@@ -1,21 +1,34 @@
-# Environment
+# ─── ENV ───────────────────────────────
 .env
+.env.*
 !.env.example
 
-# Frontend
+# ─── NODE ──────────────────────────────
+node_modules/
 frontend/node_modules/
+
+# ─── BUILD ─────────────────────────────
 frontend/dist/
+dist/
+build/
 
-# Backend uploads
+# ─── BACKEND ───────────────────────────
 backend/uploads/
+backend/main
+backend/tmp/
+*.exe
+*.out
 
-# OS
+# ─── LOGS ──────────────────────────────
+*.log
+
+# ─── OS ────────────────────────────────
 .DS_Store
 Thumbs.db
 
-# IDE
+# ─── IDE ───────────────────────────────
 .vscode/
 .idea/
 
-# Go binary
-backend/main
+# ─── DOCKER ────────────────────────────
+docker-compose.override.yml
