@@ -31,15 +31,15 @@ jobs:
 
             cd /root/nexora-node/apps/nexflow
 
-            # Pull latest from GitHub
+            echo "🔄 Sync code..."
             git fetch origin main
             git reset --hard origin/main
 
-            # Rebuild and restart containers
-            docker-compose pull --ignore-pull-failures 2>/dev/null || true
-            docker-compose up --build -d
+            echo "🐳 Restart containers..."
+            docker compose down || true
+            docker compose pull --ignore-pull-failures 2>/dev/null || true
+            docker compose up -d --build
 
-            # Wait for backend to be healthy
             echo "⏳ Waiting for backend..."
             for i in $(seq 1 20); do
               if docker exec nexflow-backend wget -q -O- http://localhost:8080/health > /dev/null 2>&1; then
@@ -49,11 +49,13 @@ jobs:
               sleep 3
             done
 
-            # Cleanup old images
+            echo "🧹 Cleanup old images..."
             docker image prune -f
 
-            echo "✅ NextFlow deployed successfully!"
+            echo "📦 Running containers:"
             docker ps --filter "name=nexflow" --format "table {{.Names}}\t{{.Status}}"
+
+            echo "✅ NextFlow deployed successfully!"
           ENDSSH
 
       - name: Notify success
