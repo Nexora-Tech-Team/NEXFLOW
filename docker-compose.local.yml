@@ -1,0 +1,67 @@
+version: '3.8'
+
+services:
+  nexflow-db:
+    image: postgres:15-alpine
+    container_name: nexflow-db
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-nexflow}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-strongpassword}
+    ports:
+      - "5434:5432"
+    volumes:
+      - nexflow_postgres_data:/var/lib/postgresql/data
+    restart: unless-stopped
+
+  nexflow-backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: nexflow-backend
+    environment:
+      DB_HOST: nexflow-db
+      DB_PORT: 5432
+      DB_USER: ${POSTGRES_USER:-postgres}
+      DB_PASSWORD: ${POSTGRES_PASSWORD:-strongpassword}
+      DB_NAME: ${POSTGRES_DB:-nexflow}
+      JWT_SECRET: ${JWT_SECRET:-supersecretkey}
+      UPLOAD_PATH: ${UPLOAD_PATH:-/app/uploads}
+      GIN_MODE: ${GIN_MODE:-debug}
+      SMTP_HOST: ${SMTP_HOST:-nexflow-mailpit}
+      SMTP_PORT: ${SMTP_PORT:-1025}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASS: ${SMTP_PASS:-}
+      SMTP_FROM: ${SMTP_FROM:-nexflow@nexoratech.co}
+    ports:
+      - "8181:8080"
+    volumes:
+      - nexflow_uploads_data:/app/uploads
+    depends_on:
+      - nexflow-db
+    restart: unless-stopped
+
+  nexflow-frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        VITE_API_URL: ${VITE_API_URL:-http://localhost:8181}
+    container_name: nexflow-frontend
+    ports:
+      - "3100:80"
+    depends_on:
+      - nexflow-backend
+    restart: unless-stopped
+
+  nexflow-mailpit:
+    image: axllent/mailpit:latest
+    container_name: nexflow-mailpit
+    ports:
+      - "1025:1025"
+      - "8025:8025"
+    restart: unless-stopped
+
+volumes:
+  nexflow_postgres_data:
+  nexflow_uploads_data:

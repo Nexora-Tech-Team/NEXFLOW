@@ -1,0 +1,65 @@
+name: Deploy NextFlow
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    name: Build & Deploy to Production
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup SSH
+        uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.DEPLOY_SSH_KEY }}
+
+      - name: Add server to known hosts
+        run: |
+          ssh-keyscan -H 72.61.209.201 >> ~/.ssh/known_hosts
+
+      - name: Deploy to server
+        run: |
+          ssh root@72.61.209.201 'bash -s' << 'ENDSSH'
+            set -e
+            echo "🚀 Starting NextFlow deployment..."
+
+            cd /root/nexora-node/apps/nexflow
+
+            # Pull latest from GitHub
+            git fetch origin main
+            git reset --hard origin/main
+
+            # Rebuild and restart containers
+            docker-compose pull --ignore-pull-failures 2>/dev/null || true
+            docker-compose up --build -d
+
+            # Wait for backend to be healthy
+            echo "⏳ Waiting for backend..."
+            for i in $(seq 1 20); do
+              if docker exec nexflow-backend wget -q -O- http://localhost:8080/health > /dev/null 2>&1; then
+                echo "✅ Backend healthy"
+                break
+              fi
+              sleep 3
+            done
+
+            # Cleanup old images
+            docker image prune -f
+
+            echo "✅ NextFlow deployed successfully!"
+            docker ps --filter "name=nexflow" --format "table {{.Names}}\t{{.Status}}"
+          ENDSSH
+
+      - name: Notify success
+        if: success()
+        run: echo "✅ Deployed to https://nexflow.nexoratech.co"
+
+      - name: Notify failure
+        if: failure()
+        run: echo "❌ Deployment failed"

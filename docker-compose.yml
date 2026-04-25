@@ -1,0 +1,90 @@
+version: '3.8'
+
+services:
+  nexflow-db:
+    image: postgres:15-alpine
+    container_name: nexflow-db
+    environment:
+      POSTGRES_DB: nexflow
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: strongpassword
+    volumes:
+      - nexflow_postgres_data:/var/lib/postgresql/data
+    networks:
+      - web
+    restart: unless-stopped
+
+  nexflow-backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: nexflow-backend
+    environment:
+      DB_HOST: nexflow-db
+      DB_PORT: 5432
+      DB_USER: postgres
+      DB_PASSWORD: strongpassword
+      DB_NAME: nexflow
+      JWT_SECRET: supersecretkey
+      UPLOAD_PATH: /app/uploads
+      GIN_MODE: release
+      SMTP_HOST: nexflow-mailpit
+      SMTP_PORT: 1025
+      SMTP_USER: ""
+      SMTP_PASS: ""
+      SMTP_FROM: nexflow@nexoratech.co
+    volumes:
+      - nexflow_uploads_data:/app/uploads
+    depends_on:
+      - nexflow-db
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=web"
+
+      - "traefik.http.routers.nexflow-api.rule=Host(`api-nexflow.nexoratech.co`)"
+      - "traefik.http.routers.nexflow-api.entrypoints=websecure"
+      - "traefik.http.routers.nexflow-api.tls.certresolver=myresolver"
+
+      - "traefik.http.services.nexflow-api.loadbalancer.server.port=8080"
+
+    networks:
+      - web
+    restart: unless-stopped
+
+  nexflow-frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        VITE_API_URL: https://api-nexflow.nexoratech.co
+    container_name: nexflow-frontend
+    depends_on:
+      - nexflow-backend
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=web"
+
+      - "traefik.http.routers.nexflow.rule=Host(`nexflow.nexoratech.co`)"
+      - "traefik.http.routers.nexflow.entrypoints=websecure"
+      - "traefik.http.routers.nexflow.tls.certresolver=myresolver"
+
+      - "traefik.http.services.nexflow.loadbalancer.server.port=80"
+
+    networks:
+      - web
+    restart: unless-stopped
+
+  nexflow-mailpit:
+    image: axllent/mailpit:latest
+    container_name: nexflow-mailpit
+    networks:
+      - web
+    restart: unless-stopped
+
+volumes:
+  nexflow_postgres_data:
+  nexflow_uploads_data:
+
+networks:
+  web:
+    external: true
