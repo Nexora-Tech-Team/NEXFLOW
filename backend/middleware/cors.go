@@ -12,6 +12,7 @@ func CORSMiddleware() gin.HandlerFunc {
 	allowedOrigins := []string{
 		"http://localhost:3000",
 		"http://localhost:3001",
+		"http://localhost:3003",
 		"http://localhost:3100",
 		"http://localhost:5173",
 		"https://nexflow.nexoratech.co",

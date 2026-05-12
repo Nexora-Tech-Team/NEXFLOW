@@ -24,7 +24,7 @@ RUN npm run build
 # =========================
 # NGINX STAGE
 # =========================
-FROM nginx:alpine
+FROM nginx:1.26-alpine
 
 # Copy hasil build
 COPY --from=builder /app/dist /usr/share/nginx/html
