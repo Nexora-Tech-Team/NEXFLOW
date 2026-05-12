@@ -3,9 +3,31 @@ import { useEffect, useRef, useState } from 'react'
 interface PDFViewerProps {
   url: string
   token?: string
+  username?: string
 }
 
-export default function PDFViewer({ url, token }: PDFViewerProps) {
+function drawWatermark(canvas: HTMLCanvasElement, username: string) {
+  const ctx = canvas.getContext('2d')
+  if (!ctx) return
+
+  const text = `${username} | ${new Date().toLocaleString('id-ID')} | CONFIDENTIAL`
+  const fontSize = Math.max(12, canvas.width * 0.018)
+  ctx.save()
+  ctx.font = `bold ${fontSize}px Arial`
+  ctx.fillStyle = 'rgba(180, 0, 0, 0.18)'
+  ctx.translate(canvas.width / 2, canvas.height / 2)
+  ctx.rotate(-Math.PI / 5)
+  ctx.textAlign = 'center'
+
+  const lineSpacing = fontSize * 4
+  const lines = Math.ceil(canvas.height / lineSpacing) + 2
+  for (let i = -lines; i <= lines; i++) {
+    ctx.fillText(text, 0, i * lineSpacing)
+  }
+  ctx.restore()
+}
+
+export default function PDFViewer({ url, token, username }: PDFViewerProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const [currentPage, setCurrentPage] = useState(1)
   const [totalPages, setTotalPages] = useState(0)
@@ -72,6 +94,10 @@ export default function PDFViewer({ url, token }: PDFViewerProps) {
         canvas.width = viewport.width
 
         await page.render({ canvasContext: context, viewport }).promise
+
+        if (!cancelled && username) {
+          drawWatermark(canvas, username)
+        }
       } catch (err) {
         console.error('Render error:', err)
       }
@@ -79,7 +105,7 @@ export default function PDFViewer({ url, token }: PDFViewerProps) {
 
     renderPage()
     return () => { cancelled = true }
-  }, [currentPage, scale, totalPages])
+  }, [currentPage, scale, totalPages, username])
 
   if (error) {
     return (

@@ -65,6 +65,7 @@ func AutoMigrate(db *gorm.DB) {
 		&models.TaskStatusHistory{},
 		&models.TaskAttachment{},
 		&models.Notification{},
+		&models.DocumentUserPrint{},
 	)
 	if err != nil {
 		log.Fatalf("AutoMigrate failed: %v", err)

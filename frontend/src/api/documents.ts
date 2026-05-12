@@ -33,10 +33,13 @@ export const documentsApi = {
     axiosInstance.delete(`/api/documents/${id}`),
 
   downloadUrl: (id: string) =>
-    `${import.meta.env.VITE_API_URL || 'http://localhost:8080'}/api/documents/${id}/download`,
+    `${import.meta.env.VITE_API_URL || ''}/api/documents/${id}/download`,
 
   previewUrl: (id: string) =>
-    `${import.meta.env.VITE_API_URL || 'http://localhost:8080'}/api/documents/${id}/preview`,
+    `${import.meta.env.VITE_API_URL || ''}/api/documents/${id}/preview`,
+
+  printUrl: (id: string) =>
+    `${import.meta.env.VITE_API_URL || ''}/api/documents/${id}/print`,
 
   addComment: (id: string, data: CommentPayload) =>
     axiosInstance.post(`/api/documents/${id}/comments`, data),
@@ -46,4 +49,7 @@ export const documentsApi = {
 
   getCategories: () =>
     axiosInstance.get('/api/documents/categories'),
+
+  getPrintQuota: (id: string) =>
+    axiosInstance.get(`/api/documents/${id}/print-quota`),
 }

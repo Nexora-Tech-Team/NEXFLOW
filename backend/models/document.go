@@ -26,6 +26,9 @@ type Document struct {
 	WatermarkPosition  string         `json:"watermark_position"`
 	WatermarkAngle     float64        `json:"watermark_angle"`
 	UseGlobalWatermark bool           `gorm:"default:true" json:"use_global_watermark"`
+	MaxPrint           int            `gorm:"default:0" json:"max_print"`
+	AllowPreview       bool           `gorm:"default:true" json:"allow_preview"`
+	ExpiryDate         *time.Time     `json:"expiry_date"`
 	CreatedAt          time.Time      `json:"created_at"`
 	UpdatedAt          time.Time      `json:"updated_at"`
 	DeletedAt          gorm.DeletedAt `gorm:"index" json:"-"`

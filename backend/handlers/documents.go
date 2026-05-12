@@ -178,19 +178,22 @@ func (h *DocumentHandler) UpdateDocument(c *gin.Context) {
 	}
 
 	var req struct {
-		Title              string  `json:"title"`
-		Category           string  `json:"category"`
-		SubCategory        string  `json:"sub_category"`
-		Area               string  `json:"area"`
-		Description        string  `json:"description"`
-		Status             string  `json:"status"`
-		UseGlobalWatermark *bool   `json:"use_global_watermark"`
-		WatermarkText      string  `json:"watermark_text"`
-		WatermarkColor     string  `json:"watermark_color"`
-		WatermarkOpacity   float64 `json:"watermark_opacity"`
-		WatermarkSize      float64 `json:"watermark_size"`
-		WatermarkPosition  string  `json:"watermark_position"`
-		WatermarkAngle     float64 `json:"watermark_angle"`
+		Title              string     `json:"title"`
+		Category           string     `json:"category"`
+		SubCategory        string     `json:"sub_category"`
+		Area               string     `json:"area"`
+		Description        string     `json:"description"`
+		Status             string     `json:"status"`
+		UseGlobalWatermark *bool      `json:"use_global_watermark"`
+		WatermarkText      string     `json:"watermark_text"`
+		WatermarkColor     string     `json:"watermark_color"`
+		WatermarkOpacity   float64    `json:"watermark_opacity"`
+		WatermarkSize      float64    `json:"watermark_size"`
+		WatermarkPosition  string     `json:"watermark_position"`
+		WatermarkAngle     float64    `json:"watermark_angle"`
+		MaxPrint           *int       `json:"max_print"`
+		AllowPreview       *bool      `json:"allow_preview"`
+		ExpiryDate         *time.Time `json:"expiry_date"`
 	}
 
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -237,6 +240,15 @@ func (h *DocumentHandler) UpdateDocument(c *gin.Context) {
 	}
 	if req.WatermarkAngle != 0 {
 		updates["watermark_angle"] = req.WatermarkAngle
+	}
+	if req.MaxPrint != nil {
+		updates["max_print"] = *req.MaxPrint
+	}
+	if req.AllowPreview != nil {
+		updates["allow_preview"] = *req.AllowPreview
+	}
+	if req.ExpiryDate != nil {
+		updates["expiry_date"] = req.ExpiryDate
 	}
 
 	if err := h.DB.Model(&doc).Updates(updates).Error; err != nil {
@@ -357,6 +369,16 @@ func (h *DocumentHandler) PreviewDocument(c *gin.Context) {
 		return
 	}
 
+	if !doc.AllowPreview {
+		c.JSON(http.StatusForbidden, gin.H{"error": "Preview tidak diizinkan untuk dokumen ini"})
+		return
+	}
+
+	if doc.ExpiryDate != nil && time.Now().After(*doc.ExpiryDate) {
+		c.JSON(http.StatusForbidden, gin.H{"error": "Akses dokumen ini telah kedaluwarsa"})
+		return
+	}
+
 	ext := filepath.Ext(doc.FileName)
 	contentType := "application/octet-stream"
 	switch ext {
@@ -470,6 +492,85 @@ func (h *DocumentHandler) GetCategories(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{"data": result})
+}
+
+func (h *DocumentHandler) GetPrintQuota(c *gin.Context) {
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid document ID"})
+		return
+	}
+
+	var doc models.Document
+	if err := h.DB.First(&doc, "id = ?", id).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Document not found"})
+		return
+	}
+
+	userIDVal, _ := c.Get("userID")
+	userID := userIDVal.(uuid.UUID)
+
+	var up models.DocumentUserPrint
+	h.DB.Where("user_id = ? AND document_id = ?", userID, id).First(&up)
+
+	remaining := -1 // -1 = unlimited
+	if doc.MaxPrint > 0 {
+		remaining = doc.MaxPrint - up.PrintCount
+		if remaining < 0 {
+			remaining = 0
+		}
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"max_print":   doc.MaxPrint,
+		"print_count": up.PrintCount,
+		"remaining":   remaining,
+	})
+}
+
+func (h *DocumentHandler) PrintDocument(c *gin.Context) {
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid document ID"})
+		return
+	}
+
+	var doc models.Document
+	if err := h.DB.First(&doc, "id = ?", id).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Document not found"})
+		return
+	}
+
+	if doc.ExpiryDate != nil && time.Now().After(*doc.ExpiryDate) {
+		c.JSON(http.StatusForbidden, gin.H{"error": "Akses dokumen ini telah kedaluwarsa"})
+		return
+	}
+
+	userIDVal, _ := c.Get("userID")
+	userID := userIDVal.(uuid.UUID)
+
+	if doc.MaxPrint > 0 {
+		// Atomic upsert + increment hanya jika print_count < max_print
+		result := h.DB.Exec(`
+			INSERT INTO document_user_prints (user_id, document_id, print_count, updated_at)
+			VALUES (?, ?, 1, NOW())
+			ON CONFLICT (user_id, document_id)
+			DO UPDATE SET print_count = document_user_prints.print_count + 1, updated_at = NOW()
+			WHERE document_user_prints.print_count < ?
+		`, userID, id, doc.MaxPrint)
+
+		if result.RowsAffected == 0 {
+			c.JSON(http.StatusForbidden, gin.H{"error": "Kuota cetak dokumen ini telah habis"})
+			return
+		}
+	}
+
+	logActivity(h.DB, userID, "print", &id, "Printed document: "+doc.Title, c.ClientIP())
+
+	c.Header("Content-Disposition", fmt.Sprintf(`inline; filename="%s"`, doc.FileName))
+	c.Header("Content-Type", "application/pdf")
+	c.Header("Cache-Control", "no-store")
+	c.File(doc.FilePath)
 }
 
 // helper to avoid undefined at compile time

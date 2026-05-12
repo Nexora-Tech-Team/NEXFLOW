@@ -85,6 +85,8 @@ func Setup(r *gin.Engine, db *gorm.DB, cfg *config.Config) {
 			docs.GET("/:id/preview", middleware.RequirePermission(db, "edoc", models.AccessView), docHandler.PreviewDocument)
 			docs.POST("/:id/comments", middleware.RequirePermission(db, "edoc", models.AccessEdit), docHandler.AddComment)
 			docs.GET("/:id/comments", middleware.RequirePermission(db, "edoc", models.AccessView), docHandler.ListComments)
+			docs.GET("/:id/print-quota", middleware.RequirePermission(db, "edoc", models.AccessView), docHandler.GetPrintQuota)
+			docs.POST("/:id/print", middleware.RequirePermission(db, "edoc", models.AccessView), docHandler.PrintDocument)
 		}
 
 		// Watermark

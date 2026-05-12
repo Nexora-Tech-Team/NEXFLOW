@@ -14,12 +14,19 @@ interface Document {
   area: string; description: string; file_name: string; file_size: number
   status: string; created_at: string; updated_at: string
   use_global_watermark: boolean; watermark_text: string
+  max_print: number; allow_preview: boolean; expiry_date?: string
   uploader?: { fullname: string; email: string }
 }
 
 interface Comment {
   id: string; rating: number; text: string; created_at: string
   user: { fullname: string }
+}
+
+interface PrintQuota {
+  max_print: number
+  print_count: number
+  remaining: number
 }
 
 function formatSize(bytes: number) {
@@ -38,21 +45,27 @@ export default function DocDetail() {
   const [activeTab, setActiveTab] = useState<'info' | 'preview' | 'comments'>('info')
   const [commentForm, setCommentForm] = useState({ rating: 0, text: '' })
   const [isEditing, setIsEditing] = useState(false)
-  const [editForm, setEditForm] = useState({ title: '', category: '', sub_category: '', area: '', description: '', status: '' })
+  const [editForm, setEditForm] = useState({ title: '', category: '', sub_category: '', area: '', description: '', status: '', max_print: 0, allow_preview: true, expiry_date: '' })
   const [sidebarOpen, setSidebarOpen] = useState(false)
+  const [printQuota, setPrintQuota] = useState<PrintQuota | null>(null)
+  const [isPrinting, setIsPrinting] = useState(false)
   const { showNotif } = useContext(NotifContext)
   const edocPerm = usePermission('edoc')
-  const { token } = useAuth()
+  const { token, user } = useAuth()
   const navigate = useNavigate()
+
+  const isExpired = doc?.expiry_date ? new Date() > new Date(doc.expiry_date) : false
 
   useEffect(() => {
     if (!id) return
     Promise.all([
       documentsApi.get(id),
       documentsApi.listComments(id),
-    ]).then(([docRes, commRes]) => {
+      documentsApi.getPrintQuota(id),
+    ]).then(([docRes, commRes, quotaRes]) => {
       setDoc(docRes.data.data)
       setComments(commRes.data.data)
+      setPrintQuota(quotaRes.data)
     }).catch(() => showNotif('error', 'Gagal memuat dokumen'))
     .finally(() => setIsLoading(false))
   }, [id])
@@ -60,13 +73,10 @@ export default function DocDetail() {
   const handleDownload = () => {
     if (!id) return
     const url = documentsApi.downloadUrl(id)
-    const a = document.createElement('a')
-    a.href = url
-    a.setAttribute('Authorization', `Bearer ${token}`)
-    // Use fetch with auth header
     fetch(url, { headers: { Authorization: `Bearer ${token}` } })
       .then(r => r.blob())
       .then(blob => {
+        const a = document.createElement('a')
         const blobUrl = URL.createObjectURL(blob)
         a.href = blobUrl
         a.download = doc?.file_name || 'document'
@@ -75,14 +85,51 @@ export default function DocDetail() {
       }).catch(() => showNotif('error', 'Gagal mengunduh dokumen'))
   }
 
+  const handlePrint = async () => {
+    if (!id) return
+    setIsPrinting(true)
+    try {
+      const url = documentsApi.printUrl(id)
+      const res = await fetch(url, { method: 'POST', headers: { Authorization: `Bearer ${token}` } })
+      if (!res.ok) {
+        const err = await res.json()
+        showNotif('error', err.error || 'Gagal mencetak dokumen')
+        return
+      }
+      const blob = await res.blob()
+      const blobUrl = URL.createObjectURL(blob)
+      const iframe = document.createElement('iframe')
+      iframe.style.display = 'none'
+      iframe.src = blobUrl
+      document.body.appendChild(iframe)
+      iframe.onload = () => {
+        iframe.contentWindow?.print()
+        setTimeout(() => {
+          document.body.removeChild(iframe)
+          URL.revokeObjectURL(blobUrl)
+        }, 1000)
+      }
+      // Refresh quota
+      const quotaRes = await documentsApi.getPrintQuota(id)
+      setPrintQuota(quotaRes.data)
+    } catch { showNotif('error', 'Gagal mencetak dokumen') }
+    finally { setIsPrinting(false) }
+  }
+
   const handleSaveEdit = async () => {
     if (!id) return
     try {
-      await documentsApi.update(id, editForm)
+      const payload: Record<string, unknown> = { ...editForm }
+      if (editForm.expiry_date === '') payload.expiry_date = null
+      await documentsApi.update(id, payload)
       showNotif('success', 'Dokumen berhasil diupdate')
       setIsEditing(false)
-      const res = await documentsApi.get(id)
-      setDoc(res.data.data)
+      const [docRes, quotaRes] = await Promise.all([
+        documentsApi.get(id),
+        documentsApi.getPrintQuota(id),
+      ])
+      setDoc(docRes.data.data)
+      setPrintQuota(quotaRes.data)
     } catch { showNotif('error', 'Gagal mengupdate dokumen') }
   }
 
@@ -128,6 +175,7 @@ export default function DocDetail() {
 
   const previewUrl = documentsApi.previewUrl(doc.id)
   const isPDF = doc.file_name?.toLowerCase().endsWith('.pdf')
+  const printDisabled = printQuota !== null && printQuota.remaining === 0
 
   return (
     <div className="flex h-screen bg-background">
@@ -141,6 +189,16 @@ export default function DocDetail() {
             <span>/</span>
             <span className="text-gray-800 font-medium">{doc.title}</span>
           </div>
+
+          {/* Expiry banner */}
+          {isExpired && (
+            <div className="mb-4 px-4 py-3 rounded-lg bg-red-50 border border-red-200 text-red-700 text-sm flex items-center gap-2">
+              <svg className="w-4 h-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+              Akses dokumen ini telah kedaluwarsa sejak {new Date(doc.expiry_date!).toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' })}
+            </div>
+          )}
 
           {/* Header */}
           <div className="card p-6 mb-4">
@@ -161,7 +219,29 @@ export default function DocDetail() {
                   </span>
                 </div>
               </div>
-              <div className="flex items-center gap-2 flex-shrink-0">
+              <div className="flex items-center gap-2 flex-shrink-0 flex-wrap justify-end">
+                {/* Print quota badge */}
+                {printQuota && (
+                  <span className={`text-xs px-2 py-1 rounded-full font-medium ${printQuota.remaining === -1 ? 'bg-green-50 text-green-700' : printQuota.remaining === 0 ? 'bg-red-50 text-red-600' : 'bg-yellow-50 text-yellow-700'}`}>
+                    {printQuota.remaining === -1 ? 'Cetak: tak terbatas' : printQuota.remaining === 0 ? 'Kuota cetak habis' : `Sisa cetak: ${printQuota.remaining}`}
+                  </span>
+                )}
+                {/* Print button */}
+                {isPDF && (
+                  <PermissionGate moduleName="edoc" requiredLevel="view">
+                    <button onClick={handlePrint} disabled={isPrinting || printDisabled || isExpired}
+                      className="btn-secondary flex items-center gap-2 text-sm disabled:opacity-50 disabled:cursor-not-allowed">
+                      {isPrinting ? (
+                        <div className="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin" />
+                      ) : (
+                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z" />
+                        </svg>
+                      )}
+                      Cetak
+                    </button>
+                  </PermissionGate>
+                )}
                 <PermissionGate moduleName="edoc" requiredLevel="edit">
                   <button onClick={handleDownload} className="btn-primary flex items-center gap-2 text-sm">
                     <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -177,7 +257,7 @@ export default function DocDetail() {
                       <button onClick={() => setIsEditing(false)} className="btn-secondary text-sm">Batal</button>
                     </>
                   ) : (
-                    <button onClick={() => { setIsEditing(true); setEditForm({ title: doc.title, category: doc.category, sub_category: doc.sub_category, area: doc.area, description: doc.description, status: doc.status }) }}
+                    <button onClick={() => { setIsEditing(true); setEditForm({ title: doc.title, category: doc.category, sub_category: doc.sub_category, area: doc.area, description: doc.description, status: doc.status, max_print: doc.max_print ?? 0, allow_preview: doc.allow_preview ?? true, expiry_date: doc.expiry_date ? doc.expiry_date.slice(0, 10) : '' }) }}
                       className="btn-secondary text-sm">Edit</button>
                   )}
                 </PermissionGate>
@@ -191,8 +271,8 @@ export default function DocDetail() {
           {/* Tabs */}
           <div className="bg-white border-b border-gray-200 rounded-t-xl px-4">
             <nav className="flex gap-1">
-              {(['info', 'preview', 'comments'] as const).map(tab => (
-                <button key={tab} onClick={() => setActiveTab(tab)}
+              {(['info', ...(doc.allow_preview && !isExpired ? ['preview'] : []), 'comments'] as const).map(tab => (
+                <button key={tab} onClick={() => setActiveTab(tab as typeof activeTab)}
                   className={`px-4 py-3 text-sm font-medium border-b-2 transition-colors capitalize ${activeTab === tab ? 'border-primary text-primary' : 'border-transparent text-gray-500 hover:text-gray-700'}`}>
                   {tab === 'info' ? 'Informasi' : tab === 'preview' ? 'Preview' : `Komentar (${comments.length})`}
                 </button>
@@ -236,6 +316,21 @@ export default function DocDetail() {
                           <option value="obsolete">Usang</option>
                         </select>
                       </div>
+                      <div>
+                        <label className="label">Maks Cetak <span className="text-gray-400 font-normal">(0 = tak terbatas)</span></label>
+                        <input type="number" min={0} className="input-field" value={editForm.max_print}
+                          onChange={e => setEditForm(f => ({...f, max_print: parseInt(e.target.value) || 0}))} />
+                      </div>
+                      <div>
+                        <label className="label">Tanggal Kedaluwarsa</label>
+                        <input type="date" className="input-field" value={editForm.expiry_date}
+                          onChange={e => setEditForm(f => ({...f, expiry_date: e.target.value}))} />
+                      </div>
+                      <div className="col-span-2 flex items-center gap-2">
+                        <input type="checkbox" id="allow_preview" checked={editForm.allow_preview}
+                          onChange={e => setEditForm(f => ({...f, allow_preview: e.target.checked}))} />
+                        <label htmlFor="allow_preview" className="label mb-0">Izinkan Preview</label>
+                      </div>
                     </div>
                   )}
                 </div>
@@ -247,6 +342,8 @@ export default function DocDetail() {
                     ['Tanggal Upload', new Date(doc.created_at).toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' })],
                     ['Terakhir Diupdate', new Date(doc.updated_at).toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' })],
                     ['Watermark', doc.use_global_watermark ? 'Global' : doc.watermark_text || 'Kustom'],
+                    ['Maks Cetak', doc.max_print === 0 ? 'Tak terbatas' : String(doc.max_print)],
+                    ['Kedaluwarsa', doc.expiry_date ? new Date(doc.expiry_date).toLocaleDateString('id-ID') : '—'],
                   ].map(([label, value]) => (
                     <div key={label} className="flex gap-3">
                       <span className="text-gray-500 w-40 flex-shrink-0">{label}</span>
@@ -261,7 +358,7 @@ export default function DocDetail() {
             {activeTab === 'preview' && (
               <div>
                 {isPDF ? (
-                  <PDFViewer url={previewUrl} token={token || undefined} />
+                  <PDFViewer url={previewUrl} token={token || undefined} username={user?.fullname} />
                 ) : (
                   <div className="flex flex-col items-center justify-center py-12 text-gray-500">
                     <div className="text-5xl mb-3">📄</div>
