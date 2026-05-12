@@ -10,6 +10,7 @@ import (
 	"nextflow/utils"
 
 	"github.com/gin-gonic/gin"
+        "github.com/gin-contrib/cors"
 )
 
 func main() {
@@ -28,7 +29,9 @@ func main() {
 	}
 
 	r := gin.Default()
-	r.MaxMultipartMemory = 50 << 20 // 50 MB
+        r.Use(cors.Default())
+
+        r.MaxMultipartMemory = 50 << 20 // 50 MB
 
 	routes.Setup(r, db, cfg)
 

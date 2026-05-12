@@ -19,6 +19,8 @@ services:
       context: ./backend
       dockerfile: Dockerfile
     container_name: nexflow-backend
+    ports:
+      - "8083:8080"
     environment:
       DB_HOST: nexflow-db
       DB_PORT: 5432
@@ -56,8 +58,10 @@ services:
       context: ./frontend
       dockerfile: Dockerfile
       args:
-        VITE_API_URL: https://api-nexflow.nexoratech.co
+        VITE_API_URL: ""
     container_name: nexflow-frontend
+    ports:
+      - "3003:80"
     depends_on:
       - nexflow-backend
     labels:
